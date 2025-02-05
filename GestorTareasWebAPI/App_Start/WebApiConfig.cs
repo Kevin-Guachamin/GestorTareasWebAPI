@@ -1,7 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Web.Http;
+﻿using System.Web.Http;
+using System.Web.Http.Cors;
 
 namespace GestorTareasWebAPI
 {
@@ -9,9 +7,12 @@ namespace GestorTareasWebAPI
     {
         public static void Register(HttpConfiguration config)
         {
-            // Configuración y servicios de Web API
+            // Habilita CORS para todas las solicitudes desde 
+            var cors = new EnableCorsAttribute("http://localhost:3000", "*", "GET,POST,PUT,DELETE");
+            config.EnableCors(cors);
 
-            // Rutas de Web API
+
+            // Configuración de rutas de Web API
             config.MapHttpAttributeRoutes();
 
             config.Routes.MapHttpRoute(

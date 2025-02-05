@@ -1,8 +1,34 @@
-﻿using System;
+﻿// *****************************************************************************
+// PROYECTO 02  
+// Carlos Benavides, Kevin Guachamin
+// Fecha de entrega: 05/02/2024 
+// 
+// Resultados:
+// * El controlador `TareasController` permite la gestión de tareas a través de operaciones CRUD,
+//   asegurando que los administradores puedan gestionar todas las tareas, mientras que los miembros
+//   solo pueden ver y actualizar las suyas.
+// * La autenticación y autorización se manejan mediante `AuthMiddleware`, restringiendo correctamente
+//   el acceso a las tareas y asegurando que los usuarios solo realicen acciones permitidas.
+//
+// Conclusiones:
+// * La implementación de un controlador de tareas basado en Web API facilita la gestión y asignación
+//   de tareas en un entorno colaborativo, asegurando que cada usuario acceda solo a la información correspondiente.
+// * La restricción de permisos en cada endpoint previene modificaciones no autorizadas, mejorando la
+//   seguridad y confiabilidad del sistema.
+//
+// Recomendaciones:
+// * Se recomienda mejorar el rendimiento al manejar grandes volúmenes de datos implementando paginación en 
+//   las consultas de tareas, optimizando así el tiempo de respuesta de la API.
+// * Es recomendable incluir notificaciones en tiempo real para alertar a los usuarios sobre cambios en sus tareas,
+//   mejorando la experiencia del usuario y la eficiencia del sistema.
+// *****************************************************************************
+
+using System;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Web.Http;
+using System.Web.Http.Cors;
 using GestorTareasWebAPI.DAL;
 using GestorTareasWebAPI.Middleware;
 using GestorTareasWebAPI.Models;
@@ -13,18 +39,22 @@ namespace GestorTareasWebAPI.Controllers
     {
         private readonly GestorTareas db = new GestorTareas();
 
-        // GET: /api/tareas (Administrador obtiene todas las tareas, Miembro solo las suyas)
+        // Habilita CORS para permitir peticiones desde el frontend
+        [EnableCors(origins: "http://localhost:3000", headers: "*", methods: "*")]
+
+        // Obtiene todas las tareas si el usuario es administrador o solo las tareas del usuario autenticado si es miembro
         [HttpGet]
         [Route("api/tareas")]
         public async Task<IHttpActionResult> GetTareas()
         {
+            // Autenticar usuario
             var user = await AuthMiddleware.Authenticate(Request, db);
             if (user == null)
                 return Unauthorized();
 
+            // Si el usuario es administrador, obtiene todas las tareas
             if (await AuthMiddleware.IsAdmin(user))
             {
-                // Incluye explícitamente UsuarioId junto con los datos del usuario
                 var tareas = db.Tareas.Include(t => t.Usuario)
                     .Select(t => new
                     {
@@ -44,9 +74,9 @@ namespace GestorTareasWebAPI.Controllers
 
                 return Ok(tareas);
             }
+            // Si el usuario es miembro, solo obtiene sus propias tareas
             else if (await AuthMiddleware.IsMember(user))
             {
-                // Miembro puede obtener solo sus tareas
                 var tareas = db.Tareas.Include(t => t.Usuario)
                     .Where(t => t.UsuarioId == user.Id)
                     .Select(t => new
@@ -71,7 +101,7 @@ namespace GestorTareasWebAPI.Controllers
             return Unauthorized();
         }
 
-        // GET: /api/tareas/{id} (Administrador y Miembro pueden ver una tarea específica asignada)
+        // Obtiene una tarea específica si el usuario es administrador o si la tarea pertenece al usuario autenticado
         [HttpGet]
         [Route("api/tareas/{id}")]
         public async Task<IHttpActionResult> GetTarea(int id)
@@ -80,7 +110,7 @@ namespace GestorTareasWebAPI.Controllers
             if (user == null)
                 return Unauthorized();
 
-            // Incluye explícitamente UsuarioId junto con los datos del usuario
+            // Busca la tarea en la base de datos
             var tarea = db.Tareas.Include(t => t.Usuario)
                 .Where(t => t.Id == id)
                 .Select(t => new
@@ -103,6 +133,7 @@ namespace GestorTareasWebAPI.Controllers
             if (tarea == null)
                 return NotFound();
 
+            // Solo un administrador o el dueño de la tarea puede acceder a ella
             if (await AuthMiddleware.IsAdmin(user) || (await AuthMiddleware.IsMember(user) && tarea.UsuarioId == user.Id))
             {
                 return Ok(tarea);
@@ -111,9 +142,7 @@ namespace GestorTareasWebAPI.Controllers
             return Unauthorized();
         }
 
-
-
-        // POST: /api/tareas (Solo Administrador puede crear tareas)
+        // Crea una nueva tarea (Solo Administradores pueden hacerlo)
         [HttpPost]
         [Route("api/tareas")]
         public async Task<IHttpActionResult> CrearTarea(Tarea tarea)
@@ -128,12 +157,11 @@ namespace GestorTareasWebAPI.Controllers
             db.Tareas.Add(tarea);
             db.SaveChanges();
 
-            // Devuelve el recurso creado sin usar "DefaultApi"
             var locationUrl = $"{Request.RequestUri}/{tarea.Id}";
             return Created(locationUrl, tarea);
         }
 
-        // PUT: /api/tareas/{id} (Administrador puede editar todo, Miembro solo el estado)
+        // Modifica una tarea existente. Administradores pueden modificar todo, los miembros solo el estado.
         [HttpPut]
         [Route("api/tareas/{id}")]
         public async Task<IHttpActionResult> UpdateTarea(int id, Tarea tarea)
@@ -146,18 +174,18 @@ namespace GestorTareasWebAPI.Controllers
             if (existingTarea == null)
                 return NotFound();
 
+            // Si es administrador, puede modificar cualquier campo de la tarea
             if (await AuthMiddleware.IsAdmin(user))
             {
-                // Administrador puede editar cualquier campo
                 existingTarea.Titulo = tarea.Titulo;
                 existingTarea.Descripcion = tarea.Descripcion;
                 existingTarea.Estado = tarea.Estado;
                 existingTarea.FechaLimite = tarea.FechaLimite;
                 existingTarea.UsuarioId = tarea.UsuarioId;
             }
+            // Si es miembro, solo puede modificar el estado de la tarea
             else if (await AuthMiddleware.IsMember(user) && existingTarea.UsuarioId == user.Id)
             {
-                // Miembro solo puede cambiar el estado de la tarea
                 existingTarea.Estado = tarea.Estado;
             }
             else
@@ -168,7 +196,6 @@ namespace GestorTareasWebAPI.Controllers
             db.Entry(existingTarea).State = EntityState.Modified;
             db.SaveChanges();
 
-            // Proyecta la tarea con los atributos solicitados
             var tareaProyectada = new
             {
                 existingTarea.Id,
@@ -188,7 +215,7 @@ namespace GestorTareasWebAPI.Controllers
             return Ok(tareaProyectada);
         }
 
-        // DELETE: /api/tareas/{id} (Solo Administrador puede eliminar tareas)
+        // Elimina una tarea (Solo Administradores pueden hacerlo)
         [HttpDelete]
         [Route("api/tareas/{id}")]
         public async Task<IHttpActionResult> DeleteTarea(int id)
@@ -204,7 +231,6 @@ namespace GestorTareasWebAPI.Controllers
             db.Tareas.Remove(tarea);
             db.SaveChanges();
 
-            // Proyecta la tarea eliminada con los atributos solicitados
             var tareaProyectada = new
             {
                 tarea.Id,
@@ -223,61 +249,5 @@ namespace GestorTareasWebAPI.Controllers
 
             return Ok(tareaProyectada);
         }
-
-        // GET: /api/tareas/filter?estado={estado} (Filtra tareas por estado)
-        [HttpGet]
-        [Route("api/tareas/filter")]
-        public async Task<IHttpActionResult> GetTareasByEstado(string estado)
-        {
-            var user = await AuthMiddleware.Authenticate(Request, db);
-            if (user == null)
-                return Unauthorized();
-
-            if (await AuthMiddleware.IsAdmin(user))
-            {
-                var tareas = db.Tareas.Include(t => t.Usuario)
-                    .Where(t => t.Estado.Equals(estado, StringComparison.OrdinalIgnoreCase))
-                    .Select(t => new
-                    {
-                        t.Id,
-                        t.Titulo,
-                        t.Descripcion,
-                        t.Estado,
-                        t.FechaLimite,
-                        t.UsuarioId,
-                        Usuario = new
-                        {
-                            t.Usuario.Nombre,
-                            t.Usuario.Apellido,
-                            t.Usuario.Correo
-                        }
-                    }).ToList();
-                return Ok(tareas);
-            }
-            else if (await AuthMiddleware.IsMember(user))
-            {
-                var tareas = db.Tareas.Include(t => t.Usuario)
-                    .Where(t => t.UsuarioId == user.Id && t.Estado.Equals(estado, StringComparison.OrdinalIgnoreCase))
-                    .Select(t => new
-                    {
-                        t.Id,
-                        t.Titulo,
-                        t.Descripcion,
-                        t.Estado,
-                        t.FechaLimite,
-                        t.UsuarioId,
-                        Usuario = new
-                        {
-                            t.Usuario.Nombre,
-                            t.Usuario.Apellido,
-                            t.Usuario.Correo
-                        }
-                    }).ToList();
-                return Ok(tareas);
-            }
-
-            return Unauthorized();
-        }
-
     }
 }
